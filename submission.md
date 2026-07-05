@@ -123,3 +123,56 @@ This is the clearest cross-cutting flow — one request touches routes, two serv
 8. **Circular-import avoidance via local imports.** `notification_service.add_to_playlist()` imports `Playlist` and `playlist_service` *inside the function* to sidestep an import cycle between the two service modules.
 
 9. **Bugs are concentrated in the service layer.** Per the README, this is a bug-hunt starter with five planted issues, all in `services/`. Two are visible on a first read: `playlist_service.get_playlist_songs()` returns `songs[:-1]` (drops the last song — Issue #5), and `streak_service.update_listening_streak()` has a `today.weekday() != 6` (Sunday) condition that prevents legitimate streak increments (Issue #1). The seed data is intentionally built to surface these.
+
+---
+
+# Bug Fixes : Root Cause Analysis
+
+I chose to fix **Issue #1 (streak reset)**, **Issue #3 (duplicate search results)**, and
+**Issue #5 (last playlist song missing)** .
+These three distinct root-cause categories are 
+date-boundary logic, SQL join cardinality, and an off-by-one slice.
+
+Each entry has five fields: issue, how I reproduced it, how I found the root cause, the root
+cause, and the fix + side-effect check.
+
+## Issue #1 — My listening streak keeps resetting
+
+- **How I reproduced it:** The streak update is pure date logic, so I isolated the exact
+  conditional from `update_listening_streak()` and ran it against controlled dates instead of
+  firing HTTP requests. I simulated a user with `listening_streak = 3` who listened *yesterday*
+  and listens again *today*, varying only which weekday "today" is:
+  - listened Sat 2026-07-04, listens Sun 2026-07-05 (consecutive) → streak became **1** (expected 4) 
+  - listened Sun 2026-07-05, listens Mon 2026-07-06 (consecutive) → streak became **4** 
+
+  The only variable that changed the outcome was whether the listen landed on a Sunday. End-to-end
+  equivalent in the seeded DB: `darius` has `listening_streak = 3` and `last_listened_at = 2026-07-03`;
+  a `POST /songs/<id>/listen` as darius on any Sunday drops his streak to 1.
+- **How I found the root cause:** _(Milestone 3)_
+- **The root cause:** _(Milestone 3)_
+- **My fix and side-effect check:** _(Milestone 3)_
+
+## Issue #3 — The same song keeps showing up twice in search
+
+- **How I reproduced it:** I ran the exact query from `search_songs()` (a `LEFT JOIN` from `song`
+  to `song_tags`, filtering on title/artist, with **no `DISTINCT`**) against the seeded DB with
+  `q="Borough"`, which matches the artist "Borough Kings". That song ("Crown Heights Anthem") has
+  3 tags, and the query returned **3 identical rows** for it, though only **1** distinct song
+  matches. HTTP equivalent: `GET /songs/search?q=Borough` reports `count: 3` for one song.
+  Crucially, songs with 0 or 1 tag return exactly once, so the duplication only appears for
+  multi-tag songs — which is why the report calls it "inconsistent."
+- **How I found the root cause:** _(Milestone 3)_
+- **The root cause:** _(Milestone 3)_
+- **My fix and side-effect check:** _(Milestone 3)_
+
+## Issue #5 — The last song in a playlist never shows up
+
+- **How I reproduced it:** I replicated `get_playlist_songs()` — songs ordered ascending by
+  `playlist_entries.position`, then the `songs[:-1]` slice it applies — against the "Late Night
+  Vibes" playlist. The playlist has **7** songs (positions 1–7); the service returns **6**,
+  dropping "Free Throws" at position 7 (the highest position / last-added). HTTP equivalent:
+  `GET /playlists/<id>/songs` reports `count: 6`. Every non-empty playlist loses exactly its last
+  song.
+- **How I found the root cause:** _(Milestone 3)_
+- **The root cause:** _(Milestone 3)_
+- **My fix and side-effect check:** _(Milestone 3)_
