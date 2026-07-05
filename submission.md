@@ -175,9 +175,27 @@ print("Listened Sun 2026-07-05, listens Mon 2026-07-06 (consecutive):")
 print("   new streak =", new_streak(3, date(2026,7,5), date(2026,7,6)), " (EXPECTED 4)")
 
 
-- **How I found the root cause:** _(Milestone 3)_
-- **The root cause:** _(Milestone 3)_
-- **My fix and side-effect check:** _(Milestone 3)_
+- **How I found the root cause:** The report pointed at streak behavior, so I followed the
+  "listen" path top-down: `POST /songs/<id>/listen` in `routes/songs.py` → `record_listening_event()`
+  in `streak_service.py` → which delegates the math to `update_listening_streak(user, now)`. That
+  function has four branches; the only one that could wrongly reset a *valid* streak was
+  `elif days_since_last == 1 and today.weekday() != 6`. I confirmed it was the exact cause (not just
+  a suspicious line) by copying the conditional verbatim into a standalone script and running it on
+  controlled dates: a Sat→Sun consecutive listen returned 1 while Sun→Mon returned 4. Since
+  `weekday()` returns 6 only for Sunday, the `!= 6` clause was provably the switch.
+- **The root cause:** Python's `datetime.weekday()` returns 6 for Sunday (Mon=0 … Sat=5, Sun=6).
+  The increment branch required `days_since_last == 1 and today.weekday() != 6`, so on any Sunday
+  the second condition was `False` even for a legitimate consecutive-day listen. Execution then fell
+  through to the `else`, which sets `listening_streak = 1`. Result: a user's streak reset to 1
+  whenever their listen landed on a Sunday, despite having listened the day before. The weekday
+  check enforced no real rule — a streak should grow on any consecutive calendar day.
+- **My fix and side-effect check:** I removed the `and today.weekday() != 6` clause, leaving
+  `elif days_since_last == 1: user.listening_streak += 1`. That restores the intended rule:
+  consecutive day → increment, regardless of weekday. I checked every branch on both sides of the
+  boundary — same day (no change), consecutive day including Sat→Sun and Sun→Mon (increment),
+  gap > 1 day (reset), and first-ever listen (streak = 1, handled earlier). Verified with
+  `pytest tests/test_streaks.py`: the previously failing `test_streak_increments_on_sunday` now
+  passes and the other four still pass (5 passed).
 
 ## Issue #3 — The same song keeps showing up twice in search
 
@@ -188,9 +206,29 @@ print("   new streak =", new_streak(3, date(2026,7,5), date(2026,7,6)), " (EXPEC
   matches. HTTP equivalent: `GET /songs/search?q=Borough` reports `count: 3` for one song.
   Crucially, songs with 0 or 1 tag return exactly once, so the duplication only appears for
   multi-tag songs — which is why the report calls it "inconsistent."
-- **How I found the root cause:** _(Milestone 3)_
-- **The root cause:** _(Milestone 3)_
-- **My fix and side-effect check:** _(Milestone 3)_
+- **How I found the root cause:** I traced search top-down from the route: `GET /songs/search?q=`
+  in `routes/songs.py` → `search_songs(query)` in `search_service.py`. The route only wraps the
+  result, so the duplication had to originate in the query. Reading `search_songs()`, I saw it
+  `outerjoin`s `song_tags` and calls `.all()` with no `.distinct()`. Because a SELECT over a
+  one-to-many join returns one row per child, a song with N tags yields N identical `Song` rows. I
+  confirmed this by running the same join in raw SQL against the seeded DB: `q="Borough"` returned 3
+  rows for one 3-tag song, and adding `DISTINCT` collapsed it to 1. I also noticed the join
+  contributed nothing to the output — only `Song` is selected and `to_dict()` loads tags separately
+  — so it was pure dead weight causing the fan-out.
+- **The root cause:** The query joined `Song` to the `song_tags` association table
+  (`.outerjoin(song_tags, ...)`) but selected only `Song` and never de-duplicated. A relational join
+  over a one-to-many relationship produces one result row per matching child row, so a song with 3
+  tags came back as 3 identical `Song` objects, which `to_dict()` then serialized 3 times. Songs with
+  0 or 1 tag produced a single row, which is why duplication appeared only for multi-tag songs and
+  looked "inconsistent."
+- **My fix and side-effect check:** I removed the `.outerjoin(song_tags, ...)` line entirely, so the
+  query is simply `query(Song).filter(title/artist ilike).all()`. The join was never needed: each
+  result's tags are attached by `Song.to_dict()` via the `tags` relationship, not by the join. This
+  removes the row fan-out at its source rather than masking it with `.distinct()`. Side-effect check:
+  results still include the `tags` list; a multi-tag song now appears once, single-tag once, no-tag
+  once, and a non-matching query returns `[]`. Verified with `pytest tests/test_search.py`: the
+  previously failing `test_search_no_duplicates_multi_tag_song` passes and the other four pass
+  (5 passed).
 
 ## Issue #5 — The last song in a playlist never shows up
 
@@ -200,6 +238,25 @@ print("   new streak =", new_streak(3, date(2026,7,5), date(2026,7,6)), " (EXPEC
   dropping "Free Throws" at position 7 (the highest position / last-added). HTTP equivalent:
   `GET /playlists/<id>/songs` reports `count: 6`. Every non-empty playlist loses exactly its last
   song.
-- **How I found the root cause:** _(Milestone 3)_
-- **The root cause:** _(Milestone 3)_
-- **My fix and side-effect check:** _(Milestone 3)_
+- **How I found the root cause:** The symptom is user-facing ("last song missing"), so I started
+  at the endpoint that lists a playlist's songs — `GET /playlists/<id>/songs` in
+  `routes/playlists.py`. That route does nothing but call `get_playlist_songs()` and JSON-encode
+  the result, so the logic had to be in the service. Reading `get_playlist_songs()`, the
+  SQLAlchemy query correctly joins through `playlist_entries` and orders by `position` — nothing
+  wrong there. The problem was the final line: `return [song.to_dict() for song in songs[:-1]]`.
+  The `[:-1]` slice, combined with the function's own docstring promising it "returns all songs,"
+  made me confident this was the specific cause, not just a suspicious area — and the reproduction
+  confirmed it (7 fetched, 6 returned, position-7 dropped).
+- **The root cause:** The database query was correct — all N songs were fetched in position order
+  — but the return statement sliced the list with `songs[:-1]`, which is Python for "every element
+  except the last one." That silently discarded the highest-position song on every read. A
+  one-song playlist would return zero songs; an empty playlist was unaffected only because
+  `[][:-1]` is still `[]`.
+- **My fix and side-effect check:** I changed `songs[:-1]` to `songs` so every fetched song is
+  serialized and returned — the smallest change that addresses the root cause, leaving the query
+  and ordering untouched. I checked both sides of the boundary: the empty-playlist case still
+  returns `[]` (the only change was removing the slice), and non-empty playlists now return all
+  songs in order. Verified with `pytest tests/test_playlists.py`: `test_playlist_returns_all_songs`,
+  `test_playlist_returns_songs_in_order`, and `test_empty_playlist_returns_empty_list` all pass.
+  `get_playlist_songs` is consumed only by this one route (plus an unused import in
+  `notification_service`), so no other feature is affected.
