@@ -70,13 +70,16 @@ def update_listening_streak(user: User, now: datetime) -> None:
     if days_since_last == 0:
         # Already updated today — no change needed
         return
-    elif days_since_last == 1 and today.weekday() != 6:
+    elif days_since_last == 1:  
         user.listening_streak += 1
     else:
         user.listening_streak = 1
 
     user.last_listened_at = now
-
+"""
+datetime.weekday() numbers days Mon=0 … Sat=5, Sun=6. So today.weekday() != 6 is false whenever today is a Sunday. 
+On any Sunday, a perfectly valid consecutive-day listen fails the elif and falls into the else, 
+which resets the streak to 1. The extra and today.weekday() != 6 clause has no legitimate purpose — a streak should grow on every consecutive calendar day, weekday irrelevant."""
 
 def get_streak(user_id: str) -> int:
     """
