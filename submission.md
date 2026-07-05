@@ -18,7 +18,8 @@ be standalone files run from the repo root — not pasted into modules that impo
 confirm my understanding — that `datetime.weekday()` returns 6 for Sunday, and that a SQL join
 over a one-to-many relationship multiplies result rows. It proposed the minimal fixes (drop the
 weekday clause, remove the unnecessary join, remove the `[:-1]` slice), which I applied and
-committed myself as separate commits.
+committed myself as separate commits. I also was not too farmiliar with the `from flask_sqlalchemy import SQLAlchemy` 
+and claude helped me understand the sytax and functions within. 
 
 **Where I verified / corrected it:** The AI couldn't run Flask or pytest in its sandbox at first,
 so every "tests pass" claim had to be confirmed by running `pytest tests/` (13 passed). I also
