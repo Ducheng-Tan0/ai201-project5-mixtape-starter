@@ -1,3 +1,33 @@
+# AI Usage
+
+I used Claude Code (Opus 4.8) throughout, mainly for **codebase orientation and guided
+debugging** rather than writing code for me.
+
+**Orientation (Milestone 1):** I had it summarize each service file and trace real call chains
+(e.g. how adding a song to a playlist creates a notification). It drafted the codebase map, which
+I checked against the source. It correctly flagged a subtlety I'd have missed — that *sharing* a
+song doesn't itself emit a notification — and I confirmed that in `models.py` and
+`notification_service.py`.
+
+**Reproduction (Milestone 2):** I had it write standalone reproduction scripts. When I pasted the
+streak script into `streak_service.py` I hit `No module named 'app'`; working through *why* taught
+me how Python resolves imports from the script's own directory, and that reproduction scripts must
+be standalone files run from the repo root — not pasted into modules that import `app`.
+
+**Investigation (Milestone 3):** For each bug I read the suspect function first, then used AI to
+confirm my understanding — that `datetime.weekday()` returns 6 for Sunday, and that a SQL join
+over a one-to-many relationship multiplies result rows. It proposed the minimal fixes (drop the
+weekday clause, remove the unnecessary join, remove the `[:-1]` slice), which I applied and
+committed myself as separate commits.
+
+**Where I verified / corrected it:** The AI couldn't run Flask or pytest in its sandbox at first,
+so every "tests pass" claim had to be confirmed by running `pytest tests/` (13 passed). I also
+rejected one edit it proposed to a source file I wanted left alone. The debugging discipline —
+reproduce, verify, check side-effects — was mine, and I confirmed every claim against the running
+code.
+
+---
+
 # Mixtape — Codebase Map
 
 Mixtape is a **social music-sharing API** built with Flask + SQLAlchemy on SQLite. Users
