@@ -148,6 +148,33 @@ cause, and the fix + side-effect check.
   The only variable that changed the outcome was whether the listen landed on a Sunday. End-to-end
   equivalent in the seeded DB: `darius` has `listening_streak = 3` and `last_listened_at = 2026-07-03`;
   a `POST /songs/<id>/listen` as darius on any Sunday drops his streak to 1.
+
+"""Reproduces Issue #1: listening streak resets on Sundays.
+Runs the exact conditional from streak_service.update_listening_streak()
+against controlled dates."""
+from datetime import date
+
+def new_streak(current, last_date, today):
+    # --- exact logic copied from update_listening_streak() ---
+    days = (today - last_date).days
+    if days == 0:
+        return current                              # already listened today
+    elif days == 1 and today.weekday() != 6:        # consecutive day -> increment
+        return current + 1
+    else:
+        return 1                                    # gap -> reset
+
+print("weekday(): Mon=0 ... Sat=5, Sun=6\n")
+
+# A consecutive-day listen that LANDS on a Sunday:
+print("Listened Sat 2026-07-04, listens Sun 2026-07-05 (consecutive):")
+print("   new streak =", new_streak(3, date(2026,7,4), date(2026,7,5)), " (EXPECTED 4)")
+
+# The same consecutive-day listen on a non-Sunday:
+print("Listened Sun 2026-07-05, listens Mon 2026-07-06 (consecutive):")
+print("   new streak =", new_streak(3, date(2026,7,5), date(2026,7,6)), " (EXPECTED 4)")
+
+
 - **How I found the root cause:** _(Milestone 3)_
 - **The root cause:** _(Milestone 3)_
 - **My fix and side-effect check:** _(Milestone 3)_

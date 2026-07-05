@@ -63,7 +63,9 @@ def get_playlist_songs(playlist_id: str) -> list[dict]:
         .all()
     )
 
-    return [song.to_dict() for song in songs[:-1]]
+    return [song.to_dict() for song in songs]  # Change from songs[:-1] to songs 
+#The bug is in the return line. songs[:-1] is Python slice notation meaning "every element except the last one." 
+#So after correctly loading all 7 songs, the function throws away the one with the highest position before returning
 
 
 def get_playlist(playlist_id: str) -> dict:
